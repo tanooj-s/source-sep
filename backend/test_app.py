@@ -1,4 +1,5 @@
 import io
+import shutil
 import subprocess
 import time
 import wave
@@ -21,7 +22,7 @@ def fake_run(cmd):
         out = server.JOBS_DIR / cmd[-1].split("/")[-2] / server.MODEL / "input"
         out.mkdir(parents=True)
         for stem in server.STEMS:
-            (out / f"{stem}.wav").write_bytes(b"RIFF")
+            shutil.copy(cmd[-1], out / f"{stem}.wav")  # silent input, so the tab step runs but finds no notes
         return subprocess.CompletedProcess(cmd, 0, "", "")
     return subprocess.run(cmd, capture_output=True, text=True)
 
@@ -38,15 +39,16 @@ def test_job_lifecycle(tmp_path, monkeypatch):
     assert res.status_code == 202
     job_id = res.json["id"]
 
-    for _ in range(50):
+    for _ in range(300):  # first librosa call JIT-compiles for a while
         job = client.get(f"/api/jobs/{job_id}").json
         if job["status"] in ("done", "error"):
             break
         time.sleep(0.1)
-    assert job == {"status": "done", "stems": list(server.STEMS)}, job
+    assert job == {"status": "done", "stems": list(server.STEMS), "tab": True}, job
 
     with wave.open(str(tmp_path / job_id / "input.wav")) as w:  # ffmpeg trimmed to 1s
         assert abs(w.getnframes() / w.getframerate() - 1.0) < 0.05
 
-    assert client.get(f"/api/jobs/{job_id}/vocals.wav").data == b"RIFF"
+    assert client.get(f"/api/jobs/{job_id}/vocals.wav").data[:4] == b"RIFF"
+    assert "No bass notes detected" in client.get(f"/api/jobs/{job_id}/bass_tab.txt").text
     assert client.get(f"/api/jobs/{job_id}/secrets.wav").status_code == 404

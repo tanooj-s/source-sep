@@ -1,6 +1,6 @@
 # Source Sep
 
-Upload a song, pick a section on its waveform, and split it into **vocals, drums, bass and other** stems with [Demucs](https://github.com/adefossez/demucs) (`htdemucs`).
+Upload a song (the whole track, or a section picked on its waveform) and split it into **vocals, drums, bass and other** stems with [Demucs](https://github.com/adefossez/demucs) (`htdemucs`). The bass stem is then transcribed into ASCII tab for a 4-string bass in standard tuning (`backend/tab.py`: librosa pYIN for pitch, onsets for note starts, beat tracking for the 16th-note grid).
 
 Flask API in `backend/`, React + Vite UI in `frontend/`.
 
@@ -20,7 +20,7 @@ cd backend && uv sync && uv run flask --app app run --port 5001
 cd frontend && npm install && npm run dev
 ```
 
-The first separation downloads the model (~80 MB). On CPU, separating takes roughly as long as the clip.
+The first separation downloads the model (~80 MB). The tab step assumes 4/4 with the first detected beat as a downbeat, so bar lines can be off by a beat or two. Fret choice is greedy (stays near the last fretted position, open strings preferred).
 
 ## Run without the dev server
 
@@ -40,7 +40,8 @@ cd backend && uv run pytest
 | Method | Path | Notes |
 | --- | --- | --- |
 | POST | `/api/jobs` | multipart `file`, optional `start`/`end` seconds. Returns `202 {id}` |
-| GET | `/api/jobs/<id>` | `{status: queued, running, done or error, stems?, error?}` |
+| GET | `/api/jobs/<id>` | `{status: queued, running, done or error, stems?, tab?, tab_error?, error?}` |
 | GET | `/api/jobs/<id>/<stem>.wav` | stem is one of vocals, drums, bass, other |
+| GET | `/api/jobs/<id>/bass_tab.txt` | ASCII bass tab of the whole separated audio |
 
 Jobs live in memory with one worker and outputs land in `backend/jobs/`. A restart forgets jobs, and nothing cleans up old outputs yet.

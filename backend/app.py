@@ -6,6 +6,8 @@ from pathlib import Path
 
 from flask import Flask, abort, jsonify, request, send_from_directory
 
+import tab
+
 JOBS_DIR = Path(__file__).parent / "jobs"
 DIST_DIR = Path(__file__).parent.parent / "frontend" / "dist"
 MODEL = "htdemucs"
@@ -45,6 +47,11 @@ def separate(job_id, src, start, end):
         if result.returncode != 0:
             job.update(status="error", error="\n".join(result.stderr.strip().splitlines()[-5:]))
             return
+    try:
+        (jobdir / "bass_tab.txt").write_text(tab.transcribe(jobdir / MODEL / "input" / "bass.wav", wav))
+        job["tab"] = True
+    except Exception as e:  # the stems are still worth returning without a tab
+        job["tab_error"] = str(e)
     job["status"] = "done"
     job["stems"] = list(STEMS)
 
@@ -101,6 +108,13 @@ def get_stem(job_id, stem):
     if jobs.get(job_id, {}).get("status") != "done" or stem not in STEMS:
         abort(404, "stem not found")
     return send_from_directory(JOBS_DIR / job_id / MODEL / "input", f"{stem}.wav")
+
+
+@app.get("/api/jobs/<job_id>/bass_tab.txt")
+def get_tab(job_id):
+    if not jobs.get(job_id, {}).get("tab"):
+        abort(404, "tab not found")
+    return send_from_directory(JOBS_DIR / job_id, "bass_tab.txt")
 
 
 @app.get("/")

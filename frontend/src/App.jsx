@@ -85,8 +85,21 @@ function Picker({ file, region, setRegion }) {
   )
 }
 
+// Same m:ss format as the bar times in the bass tab.
+const formatTime = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
+
 function Stem({ name, url }) {
   const { container, ws, playing } = useWaveSurfer(url)
+  const [time, setTime] = useState(0)
+  const [duration, setDuration] = useState(0)
+
+  useEffect(() => {
+    if (!ws) return
+    // Whole seconds only, so React skips re-rendering on every animation frame.
+    const offs = [ws.on('timeupdate', (t) => setTime(Math.floor(t))), ws.on('decode', setDuration)]
+    return () => offs.forEach((off) => off())
+  }, [ws])
+
   return (
     <section className="stem">
       <div className="row">
@@ -94,6 +107,9 @@ function Stem({ name, url }) {
         <button type="button" onClick={() => ws?.playPause()} disabled={!ws}>
           {playing ? 'Pause' : 'Play'}
         </button>
+        <span className="muted time">
+          {formatTime(time)} / {formatTime(duration)}
+        </span>
         <a href={url} download={`${name}.wav`}>
           Download
         </a>
@@ -103,8 +119,31 @@ function Stem({ name, url }) {
   )
 }
 
+function BassTab({ url }) {
+  const [text, setText] = useState(null)
+
+  useEffect(() => {
+    fetch(url)
+      .then((res) => (res.ok ? res.text() : Promise.reject(new Error(`server error ${res.status}`))))
+      .then(setText, (e) => setText(`Could not load the tab: ${e.message}`))
+  }, [url])
+
+  return (
+    <section className="stem">
+      <div className="row">
+        <h3>Bass tab</h3>
+        <a href={url} download="bass_tab.txt">
+          Download
+        </a>
+      </div>
+      <pre className="tab">{text ?? 'Loading…'}</pre>
+    </section>
+  )
+}
+
 export default function App() {
   const [file, setFile] = useState(null)
+  const [wholeTrack, setWholeTrack] = useState(true)
   const [region, setRegion] = useState(null)
   const [job, setJob] = useState(null) // { id, status, stems?, error? }
   const [error, setError] = useState(null)
@@ -135,7 +174,7 @@ export default function App() {
     setError(null)
     const form = new FormData()
     form.append('file', file)
-    if (region) {
+    if (region && !wholeTrack) {
       form.append('start', region.start.toFixed(2))
       form.append('end', region.end.toFixed(2))
     }
@@ -154,7 +193,7 @@ export default function App() {
     <main>
       <h1>Source Separation</h1>
       <p className="muted">
-        Upload a song, pick a section, and split it into vocals, drums, bass and other with Demucs.
+        Upload a song and split it into vocals, drums, bass and other with Demucs, plus a tab of the bass line.
       </p>
 
       <form onSubmit={submit}>
@@ -171,7 +210,13 @@ export default function App() {
             }}
           />
         </label>
-        {file && <Picker file={file} region={region} setRegion={setRegion} />}
+        {file && (
+          <label className="row">
+            <input type="checkbox" checked={wholeTrack} onChange={(e) => setWholeTrack(e.target.checked)} />
+            Whole track (uncheck to pick a section)
+          </label>
+        )}
+        {file && !wholeTrack && <Picker file={file} region={region} setRegion={setRegion} />}
         <button type="submit" className="primary" disabled={!file || busy}>
           {busy ? 'Separating…' : 'Separate'}
         </button>
@@ -180,8 +225,8 @@ export default function App() {
       {error && <p className="error" role="alert">{error}</p>}
       {busy && (
         <p className="muted" aria-live="polite">
-          {job.status === 'queued' ? 'Queued' : 'Separating'}… {elapsed}s. On CPU this takes roughly as long as
-          the clip itself, and the first run also downloads the model.
+          {job.status === 'queued' ? 'Queued' : 'Separating and transcribing the bass'}… {elapsed}s. On CPU this
+          can take a few minutes for a full song, and the first run also downloads the model.
         </p>
       )}
       {job?.status === 'error' && (
@@ -191,6 +236,12 @@ export default function App() {
       )}
       {job?.status === 'done' &&
         job.stems.map((s) => <Stem key={s} name={s} url={`/api/jobs/${job.id}/${s}.wav`} />)}
+      {job?.tab && <BassTab url={`/api/jobs/${job.id}/bass_tab.txt`} />}
+      {job?.tab_error && (
+        <p className="error" role="alert">
+          Couldn't transcribe the bass: {job.tab_error}
+        </p>
+      )}
     </main>
   )
 }
